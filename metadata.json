@@ -1,0 +1,6 @@
+{
+  "name": "PDF Converter",
+  "description": "Complete PDF converter and utility suite with Images to PDF, Text to PDF, PDF to Images, Merge, Split, Watermark, and built-in PDF viewer.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
