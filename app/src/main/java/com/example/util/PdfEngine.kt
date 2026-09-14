@@ -5,6 +5,9 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
+import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.RectF
@@ -12,12 +15,24 @@ import android.graphics.Typeface
 import android.graphics.pdf.PdfDocument
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
+import android.os.Build
+import android.os.Bundle
+import android.os.CancellationSignal
+import android.os.Environment
 import android.os.ParcelFileDescriptor
+import android.print.PageRange
+import android.print.PrintAttributes
+import android.print.PrintDocumentAdapter
+import android.print.PrintDocumentInfo
+import android.print.PrintManager
+import android.provider.MediaStore
+import android.content.ContentValues
 import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
 import androidx.core.content.FileProvider
 import java.io.File
+import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -709,4 +724,697 @@ object PdfEngine {
         }
         return inSampleSize
     }
+
+    /**
+     * Compresses an existing PDF by re-rendering pages at controlled scale & quality.
+     */
+    fun compressPdf(
+        context: Context,
+        pdfUri: Uri,
+        qualityPercent: Int, // 40 = Maximum Compression, 65 = Balanced, 85 = Light
+        outputFile: File,
+        onProgress: (current: Int, total: Int) -> Unit = { _, _ -> }
+    ): Result<ConversionResult> = runCatching {
+        val pdfDocument = PdfDocument()
+        val scale = when {
+            qualityPercent <= 40 -> 1.0f
+            qualityPercent <= 65 -> 1.25f
+            else -> 1.5f
+        }
+
+        context.contentResolver.openFileDescriptor(pdfUri, "r")?.use { pfd ->
+            PdfRenderer(pfd).use { renderer ->
+                val totalPages = renderer.pageCount
+                for (i in 0 until totalPages) {
+                    onProgress(i + 1, totalPages)
+                    val page = renderer.openPage(i)
+                    val originalW = page.width
+                    val originalH = page.height
+
+                    val bmpW = (originalW * scale).toInt().coerceAtLeast(100)
+                    val bmpH = (originalH * scale).toInt().coerceAtLeast(100)
+
+                    val bitmap = Bitmap.createBitmap(bmpW, bmpH, Bitmap.Config.RGB_565)
+                    bitmap.eraseColor(Color.WHITE)
+                    page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                    page.close()
+
+                    // Compress to JPEG byte array in memory
+                    val byteStream = java.io.ByteArrayOutputStream()
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, qualityPercent.coerceIn(30, 95), byteStream)
+                    val compressedBytes = byteStream.toByteArray()
+                    val compressedBmp = BitmapFactory.decodeByteArray(compressedBytes, 0, compressedBytes.size)
+
+                    val pageInfo = PdfDocument.PageInfo.Builder(originalW, originalH, i + 1).create()
+                    val newPage = pdfDocument.startPage(pageInfo)
+                    newPage.canvas.drawBitmap(
+                        compressedBmp ?: bitmap,
+                        null,
+                        RectF(0f, 0f, originalW.toFloat(), originalH.toFloat()),
+                        Paint(Paint.FILTER_BITMAP_FLAG)
+                    )
+                    pdfDocument.finishPage(newPage)
+
+                    bitmap.recycle()
+                    compressedBmp?.recycle()
+                }
+            }
+        }
+
+        FileOutputStream(outputFile).use { fos ->
+            pdfDocument.writeTo(fos)
+        }
+        pdfDocument.close()
+
+        ConversionResult(
+            file = outputFile,
+            pageCount = getPdfPageCount(context, Uri.fromFile(outputFile)),
+            fileSizeBytes = outputFile.length()
+        )
+    }
+
+    /**
+     * Rotates all pages or selected pages of a PDF by 90, 180, or 270 degrees clockwise.
+     */
+    fun rotatePdf(
+        context: Context,
+        pdfUri: Uri,
+        rotationDegrees: Int, // 90, 180, 270
+        outputFile: File,
+        onProgress: (current: Int, total: Int) -> Unit = { _, _ -> }
+    ): Result<ConversionResult> = runCatching {
+        val pdfDocument = PdfDocument()
+
+        context.contentResolver.openFileDescriptor(pdfUri, "r")?.use { pfd ->
+            PdfRenderer(pfd).use { renderer ->
+                val totalPages = renderer.pageCount
+                for (i in 0 until totalPages) {
+                    onProgress(i + 1, totalPages)
+                    val page = renderer.openPage(i)
+                    val origW = page.width
+                    val origH = page.height
+
+                    val scale = 1.5f
+                    val bmpW = (origW * scale).toInt()
+                    val bmpH = (origH * scale).toInt()
+
+                    val bitmap = Bitmap.createBitmap(bmpW, bmpH, Bitmap.Config.ARGB_8888)
+                    bitmap.eraseColor(Color.WHITE)
+                    page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                    page.close()
+
+                    // Determine target page dimensions
+                    val isSwap = rotationDegrees == 90 || rotationDegrees == 270
+                    val targetW = if (isSwap) origH else origW
+                    val targetH = if (isSwap) origW else origH
+
+                    val matrix = Matrix().apply {
+                        postRotate(rotationDegrees.toFloat())
+                    }
+                    val rotatedBmp = Bitmap.createBitmap(bitmap, 0, 0, bmpW, bmpH, matrix, true)
+
+                    val pageInfo = PdfDocument.PageInfo.Builder(targetW, targetH, i + 1).create()
+                    val newPage = pdfDocument.startPage(pageInfo)
+                    newPage.canvas.drawBitmap(
+                        rotatedBmp,
+                        null,
+                        RectF(0f, 0f, targetW.toFloat(), targetH.toFloat()),
+                        Paint(Paint.FILTER_BITMAP_FLAG)
+                    )
+                    pdfDocument.finishPage(newPage)
+
+                    bitmap.recycle()
+                    if (rotatedBmp != bitmap) rotatedBmp.recycle()
+                }
+            }
+        }
+
+        FileOutputStream(outputFile).use { fos ->
+            pdfDocument.writeTo(fos)
+        }
+        pdfDocument.close()
+
+        ConversionResult(
+            file = outputFile,
+            pageCount = getPdfPageCount(context, Uri.fromFile(outputFile)),
+            fileSizeBytes = outputFile.length()
+        )
+    }
+
+    /**
+     * Converts a PDF to high-contrast Grayscale / Black & White to save printer ink.
+     */
+    fun grayscalePdf(
+        context: Context,
+        pdfUri: Uri,
+        outputFile: File,
+        onProgress: (current: Int, total: Int) -> Unit = { _, _ -> }
+    ): Result<ConversionResult> = runCatching {
+        val pdfDocument = PdfDocument()
+        val colorMatrix = ColorMatrix().apply { setSaturation(0f) }
+        val grayPaint = Paint(Paint.FILTER_BITMAP_FLAG).apply {
+            colorFilter = ColorMatrixColorFilter(colorMatrix)
+        }
+
+        context.contentResolver.openFileDescriptor(pdfUri, "r")?.use { pfd ->
+            PdfRenderer(pfd).use { renderer ->
+                val totalPages = renderer.pageCount
+                for (i in 0 until totalPages) {
+                    onProgress(i + 1, totalPages)
+                    val page = renderer.openPage(i)
+                    val pageW = page.width
+                    val pageH = page.height
+
+                    val scale = 1.5f
+                    val bmpW = (pageW * scale).toInt()
+                    val bmpH = (pageH * scale).toInt()
+
+                    val bitmap = Bitmap.createBitmap(bmpW, bmpH, Bitmap.Config.ARGB_8888)
+                    bitmap.eraseColor(Color.WHITE)
+                    page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                    page.close()
+
+                    val pageInfo = PdfDocument.PageInfo.Builder(pageW, pageH, i + 1).create()
+                    val newPage = pdfDocument.startPage(pageInfo)
+                    newPage.canvas.drawBitmap(
+                        bitmap,
+                        null,
+                        RectF(0f, 0f, pageW.toFloat(), pageH.toFloat()),
+                        grayPaint
+                    )
+                    pdfDocument.finishPage(newPage)
+
+                    bitmap.recycle()
+                }
+            }
+        }
+
+        FileOutputStream(outputFile).use { fos ->
+            pdfDocument.writeTo(fos)
+        }
+        pdfDocument.close()
+
+        ConversionResult(
+            file = outputFile,
+            pageCount = getPdfPageCount(context, Uri.fromFile(outputFile)),
+            fileSizeBytes = outputFile.length()
+        )
+    }
+
+    /**
+     * Inverts PDF colors (Night / Dark Mode PDF).
+     */
+    fun invertPdf(
+        context: Context,
+        pdfUri: Uri,
+        outputFile: File,
+        onProgress: (current: Int, total: Int) -> Unit = { _, _ -> }
+    ): Result<ConversionResult> = runCatching {
+        val pdfDocument = PdfDocument()
+        val invertMatrix = ColorMatrix(
+            floatArrayOf(
+                -1f,  0f,  0f,  0f, 255f,
+                 0f, -1f,  0f,  0f, 255f,
+                 0f,  0f, -1f,  0f, 255f,
+                 0f,  0f,  0f,  1f,   0f
+            )
+        )
+        val invertPaint = Paint(Paint.FILTER_BITMAP_FLAG).apply {
+            colorFilter = ColorMatrixColorFilter(invertMatrix)
+        }
+
+        context.contentResolver.openFileDescriptor(pdfUri, "r")?.use { pfd ->
+            PdfRenderer(pfd).use { renderer ->
+                val totalPages = renderer.pageCount
+                for (i in 0 until totalPages) {
+                    onProgress(i + 1, totalPages)
+                    val page = renderer.openPage(i)
+                    val pageW = page.width
+                    val pageH = page.height
+
+                    val scale = 1.5f
+                    val bmpW = (pageW * scale).toInt()
+                    val bmpH = (pageH * scale).toInt()
+
+                    val bitmap = Bitmap.createBitmap(bmpW, bmpH, Bitmap.Config.ARGB_8888)
+                    bitmap.eraseColor(Color.WHITE)
+                    page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                    page.close()
+
+                    val pageInfo = PdfDocument.PageInfo.Builder(pageW, pageH, i + 1).create()
+                    val newPage = pdfDocument.startPage(pageInfo)
+                    newPage.canvas.drawBitmap(
+                        bitmap,
+                        null,
+                        RectF(0f, 0f, pageW.toFloat(), pageH.toFloat()),
+                        invertPaint
+                    )
+                    pdfDocument.finishPage(newPage)
+
+                    bitmap.recycle()
+                }
+            }
+        }
+
+        FileOutputStream(outputFile).use { fos ->
+            pdfDocument.writeTo(fos)
+        }
+        pdfDocument.close()
+
+        ConversionResult(
+            file = outputFile,
+            pageCount = getPdfPageCount(context, Uri.fromFile(outputFile)),
+            fileSizeBytes = outputFile.length()
+        )
+    }
+
+    /**
+     * Adds professional page numbers and optional header title to an existing PDF.
+     */
+    fun addPageNumbersAndHeader(
+        context: Context,
+        pdfUri: Uri,
+        headerText: String,
+        numberFormat: String, // "Page %d of %d", "- %d -", or "Page %d"
+        outputFile: File,
+        onProgress: (current: Int, total: Int) -> Unit = { _, _ -> }
+    ): Result<ConversionResult> = runCatching {
+        val pdfDocument = PdfDocument()
+
+        context.contentResolver.openFileDescriptor(pdfUri, "r")?.use { pfd ->
+            PdfRenderer(pfd).use { renderer ->
+                val totalPages = renderer.pageCount
+                val fontPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = Color.rgb(60, 60, 60)
+                    textSize = 11f
+                    typeface = Typeface.SANS_SERIF
+                }
+                val linePaint = Paint().apply {
+                    color = Color.rgb(210, 210, 210)
+                    strokeWidth = 1f
+                }
+
+                for (i in 0 until totalPages) {
+                    onProgress(i + 1, totalPages)
+                    val page = renderer.openPage(i)
+                    val pageW = page.width
+                    val pageH = page.height
+
+                    val scale = 1.5f
+                    val bmpW = (pageW * scale).toInt()
+                    val bmpH = (pageH * scale).toInt()
+
+                    val bitmap = Bitmap.createBitmap(bmpW, bmpH, Bitmap.Config.ARGB_8888)
+                    bitmap.eraseColor(Color.WHITE)
+                    page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                    page.close()
+
+                    val pageInfo = PdfDocument.PageInfo.Builder(pageW, pageH, i + 1).create()
+                    val newPage = pdfDocument.startPage(pageInfo)
+                    val canvas = newPage.canvas
+
+                    canvas.drawBitmap(bitmap, null, RectF(0f, 0f, pageW.toFloat(), pageH.toFloat()), Paint(Paint.FILTER_BITMAP_FLAG))
+
+                    // Draw Header if provided
+                    if (headerText.isNotBlank()) {
+                        canvas.drawText(headerText, 36f, 26f, fontPaint)
+                        canvas.drawLine(36f, 32f, (pageW - 36).toFloat(), 32f, linePaint)
+                    }
+
+                    // Draw Footer Page Number
+                    val pageStr = when (numberFormat) {
+                        "- %d -" -> "- ${i + 1} -"
+                        "Page %d" -> "Page ${i + 1}"
+                        else -> "Page ${i + 1} of $totalPages"
+                    }
+                    val textW = fontPaint.measureText(pageStr)
+                    canvas.drawLine(36f, (pageH - 30).toFloat(), (pageW - 36).toFloat(), (pageH - 30).toFloat(), linePaint)
+                    canvas.drawText(pageStr, (pageW - textW) / 2f, (pageH - 14).toFloat(), fontPaint)
+
+                    pdfDocument.finishPage(newPage)
+                    bitmap.recycle()
+                }
+            }
+        }
+
+        FileOutputStream(outputFile).use { fos ->
+            pdfDocument.writeTo(fos)
+        }
+        pdfDocument.close()
+
+        ConversionResult(
+            file = outputFile,
+            pageCount = getPdfPageCount(context, Uri.fromFile(outputFile)),
+            fileSizeBytes = outputFile.length()
+        )
+    }
+
+    /**
+     * Deletes specified pages from a PDF.
+     */
+    fun deletePages(
+        context: Context,
+        pdfUri: Uri,
+        pagesToDelete: Set<Int>, // 0-based
+        outputFile: File,
+        onProgress: (current: Int, total: Int) -> Unit = { _, _ -> }
+    ): Result<ConversionResult> = runCatching {
+        val pdfDocument = PdfDocument()
+        var newPageNum = 1
+
+        context.contentResolver.openFileDescriptor(pdfUri, "r")?.use { pfd ->
+            PdfRenderer(pfd).use { renderer ->
+                val totalPages = renderer.pageCount
+                val pagesToKeep = (0 until totalPages).filterNot { it in pagesToDelete }
+                if (pagesToKeep.isEmpty()) throw IllegalStateException("Cannot delete all pages in document")
+
+                pagesToKeep.forEachIndexed { step, pageIdx ->
+                    onProgress(step + 1, pagesToKeep.size)
+                    val page = renderer.openPage(pageIdx)
+                    val pageW = page.width
+                    val pageH = page.height
+
+                    val scale = 1.5f
+                    val bmpW = (pageW * scale).toInt()
+                    val bmpH = (pageH * scale).toInt()
+
+                    val bitmap = Bitmap.createBitmap(bmpW, bmpH, Bitmap.Config.ARGB_8888)
+                    bitmap.eraseColor(Color.WHITE)
+                    page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                    page.close()
+
+                    val pageInfo = PdfDocument.PageInfo.Builder(pageW, pageH, newPageNum++).create()
+                    val newPage = pdfDocument.startPage(pageInfo)
+                    newPage.canvas.drawBitmap(bitmap, null, RectF(0f, 0f, pageW.toFloat(), pageH.toFloat()), Paint(Paint.FILTER_BITMAP_FLAG))
+                    pdfDocument.finishPage(newPage)
+                    bitmap.recycle()
+                }
+            }
+        }
+
+        FileOutputStream(outputFile).use { fos ->
+            pdfDocument.writeTo(fos)
+        }
+        pdfDocument.close()
+
+        ConversionResult(
+            file = outputFile,
+            pageCount = newPageNum - 1,
+            fileSizeBytes = outputFile.length()
+        )
+    }
+
+    /**
+     * Reorders pages of a PDF in the given sequence.
+     */
+    fun reorderPages(
+        context: Context,
+        pdfUri: Uri,
+        newOrder: List<Int>, // 0-based list of page indices
+        outputFile: File,
+        onProgress: (current: Int, total: Int) -> Unit = { _, _ -> }
+    ): Result<ConversionResult> = runCatching {
+        val pdfDocument = PdfDocument()
+        var targetPageNum = 1
+
+        context.contentResolver.openFileDescriptor(pdfUri, "r")?.use { pfd ->
+            PdfRenderer(pfd).use { renderer ->
+                newOrder.forEachIndexed { step, pageIdx ->
+                    if (pageIdx in 0 until renderer.pageCount) {
+                        onProgress(step + 1, newOrder.size)
+                        val page = renderer.openPage(pageIdx)
+                        val pageW = page.width
+                        val pageH = page.height
+
+                        val scale = 1.5f
+                        val bmpW = (pageW * scale).toInt()
+                        val bmpH = (pageH * scale).toInt()
+
+                        val bitmap = Bitmap.createBitmap(bmpW, bmpH, Bitmap.Config.ARGB_8888)
+                        bitmap.eraseColor(Color.WHITE)
+                        page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                        page.close()
+
+                        val pageInfo = PdfDocument.PageInfo.Builder(pageW, pageH, targetPageNum++).create()
+                        val newPage = pdfDocument.startPage(pageInfo)
+                        newPage.canvas.drawBitmap(bitmap, null, RectF(0f, 0f, pageW.toFloat(), pageH.toFloat()), Paint(Paint.FILTER_BITMAP_FLAG))
+                        pdfDocument.finishPage(newPage)
+                        bitmap.recycle()
+                    }
+                }
+            }
+        }
+
+        FileOutputStream(outputFile).use { fos ->
+            pdfDocument.writeTo(fos)
+        }
+        pdfDocument.close()
+
+        ConversionResult(
+            file = outputFile,
+            pageCount = targetPageNum - 1,
+            fileSizeBytes = outputFile.length()
+        )
+    }
+
+    /**
+     * Digitally signs a PDF page with a signature bitmap at the designated position.
+     */
+    fun signPdf(
+        context: Context,
+        pdfUri: Uri,
+        signatureBitmap: Bitmap,
+        targetPageIndex: Int,
+        xRatio: Float = 0.5f,
+        yRatio: Float = 0.82f,
+        scaleRatio: Float = 0.35f,
+        outputFile: File,
+        onProgress: (current: Int, total: Int) -> Unit = { _, _ -> }
+    ): Result<ConversionResult> = runCatching {
+        val pdfDocument = PdfDocument()
+
+        context.contentResolver.openFileDescriptor(pdfUri, "r")?.use { pfd ->
+            PdfRenderer(pfd).use { renderer ->
+                val totalPages = renderer.pageCount
+                for (i in 0 until totalPages) {
+                    onProgress(i + 1, totalPages)
+                    val page = renderer.openPage(i)
+                    val pageW = page.width
+                    val pageH = page.height
+
+                    val scale = 1.5f
+                    val bmpW = (pageW * scale).toInt()
+                    val bmpH = (pageH * scale).toInt()
+
+                    val bitmap = Bitmap.createBitmap(bmpW, bmpH, Bitmap.Config.ARGB_8888)
+                    bitmap.eraseColor(Color.WHITE)
+                    page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                    page.close()
+
+                    val pageInfo = PdfDocument.PageInfo.Builder(pageW, pageH, i + 1).create()
+                    val newPage = pdfDocument.startPage(pageInfo)
+                    val canvas = newPage.canvas
+
+                    canvas.drawBitmap(bitmap, null, RectF(0f, 0f, pageW.toFloat(), pageH.toFloat()), Paint(Paint.FILTER_BITMAP_FLAG))
+
+                    // If this is the target page, stamp signature
+                    if (i == targetPageIndex) {
+                        val signW = pageW * scaleRatio
+                        val aspect = signatureBitmap.height.toFloat() / signatureBitmap.width.toFloat().coerceAtLeast(1f)
+                        val signH = signW * aspect
+                        val left = (pageW * xRatio) - (signW / 2f)
+                        val top = (pageH * yRatio) - (signH / 2f)
+
+                        canvas.drawBitmap(
+                            signatureBitmap,
+                            null,
+                            RectF(left, top, left + signW, top + signH),
+                            Paint(Paint.FILTER_BITMAP_FLAG)
+                        )
+                    }
+
+                    pdfDocument.finishPage(newPage)
+                    bitmap.recycle()
+                }
+            }
+        }
+
+        FileOutputStream(outputFile).use { fos ->
+            pdfDocument.writeTo(fos)
+        }
+        pdfDocument.close()
+
+        ConversionResult(
+            file = outputFile,
+            pageCount = getPdfPageCount(context, Uri.fromFile(outputFile)),
+            fileSizeBytes = outputFile.length()
+        )
+    }
+
+    /**
+     * Adds an official security stamp badge (e.g. CONFIDENTIAL, APPROVED, DRAFT, OFFICIAL).
+     */
+    fun stampPdf(
+        context: Context,
+        pdfUri: Uri,
+        stampText: String,
+        stampColor: Int,
+        outputFile: File,
+        onProgress: (current: Int, total: Int) -> Unit = { _, _ -> }
+    ): Result<ConversionResult> = runCatching {
+        val pdfDocument = PdfDocument()
+
+        context.contentResolver.openFileDescriptor(pdfUri, "r")?.use { pfd ->
+            PdfRenderer(pfd).use { renderer ->
+                val totalPages = renderer.pageCount
+                val stampPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = stampColor
+                    textSize = 32f
+                    typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+                    textAlign = Paint.Align.CENTER
+                }
+                val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = stampColor
+                    style = Paint.Style.STROKE
+                    strokeWidth = 3.5f
+                }
+
+                for (i in 0 until totalPages) {
+                    onProgress(i + 1, totalPages)
+                    val page = renderer.openPage(i)
+                    val pageW = page.width
+                    val pageH = page.height
+
+                    val scale = 1.5f
+                    val bmpW = (pageW * scale).toInt()
+                    val bmpH = (pageH * scale).toInt()
+
+                    val bitmap = Bitmap.createBitmap(bmpW, bmpH, Bitmap.Config.ARGB_8888)
+                    bitmap.eraseColor(Color.WHITE)
+                    page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                    page.close()
+
+                    val pageInfo = PdfDocument.PageInfo.Builder(pageW, pageH, i + 1).create()
+                    val newPage = pdfDocument.startPage(pageInfo)
+                    val canvas = newPage.canvas
+
+                    canvas.drawBitmap(bitmap, null, RectF(0f, 0f, pageW.toFloat(), pageH.toFloat()), Paint(Paint.FILTER_BITMAP_FLAG))
+
+                    // Draw stamp at top-right or center-slant
+                    canvas.save()
+                    canvas.translate(pageW - 130f, 65f)
+                    canvas.rotate(-15f)
+
+                    val textW = stampPaint.measureText(stampText)
+                    val boxW = textW + 36f
+                    val boxH = 46f
+                    val rectF = RectF(-boxW / 2f, -boxH / 2f, boxW / 2f, boxH / 2f)
+                    canvas.drawRoundRect(rectF, 8f, 8f, borderPaint)
+                    canvas.drawText(stampText, 0f, 11f, stampPaint)
+                    canvas.restore()
+
+                    pdfDocument.finishPage(newPage)
+                    bitmap.recycle()
+                }
+            }
+        }
+
+        FileOutputStream(outputFile).use { fos ->
+            pdfDocument.writeTo(fos)
+        }
+        pdfDocument.close()
+
+        ConversionResult(
+            file = outputFile,
+            pageCount = getPdfPageCount(context, Uri.fromFile(outputFile)),
+            fileSizeBytes = outputFile.length()
+        )
+    }
+
+    /**
+     * Downloads/saves a PDF file directly to public device Downloads folder.
+     */
+    fun savePdfToPublicDownloads(context: Context, sourceFile: File): Uri? {
+        val fileName = sourceFile.name
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val values = ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                    put(MediaStore.MediaColumns.MIME_TYPE, "application/pdf")
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/PDFConverter")
+                }
+                val uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                uri?.let { destUri ->
+                    context.contentResolver.openOutputStream(destUri)?.use { out ->
+                        sourceFile.inputStream().use { input ->
+                            input.copyTo(out)
+                        }
+                    }
+                }
+                uri
+            } else {
+                val targetDir = File(
+                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+                    "PDFConverter"
+                )
+                if (!targetDir.exists()) targetDir.mkdirs()
+                val destFile = File(targetDir, fileName)
+                sourceFile.copyTo(destFile, overwrite = true)
+                Uri.fromFile(destFile)
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /**
+     * Direct print using Android PrintManager.
+     */
+    fun printPdf(context: Context, file: File) {
+        val printManager = context.getSystemService(Context.PRINT_SERVICE) as? PrintManager ?: return
+        val printAdapter = PdfPrintDocumentAdapter(file)
+        val jobName = file.nameWithoutExtension
+        printManager.print(jobName, printAdapter, PrintAttributes.Builder().build())
+    }
 }
+
+/**
+ * PrintDocumentAdapter implementation for local PDF file printing.
+ */
+class PdfPrintDocumentAdapter(private val file: File) : PrintDocumentAdapter() {
+    override fun onLayout(
+        oldAttributes: PrintAttributes?,
+        newAttributes: PrintAttributes?,
+        cancellationSignal: CancellationSignal?,
+        callback: LayoutResultCallback?,
+        extras: Bundle?
+    ) {
+        if (cancellationSignal?.isCanceled == true) {
+            callback?.onLayoutCancelled()
+            return
+        }
+        val info = PrintDocumentInfo.Builder(file.name)
+            .setContentType(PrintDocumentInfo.CONTENT_TYPE_DOCUMENT)
+            .build()
+        callback?.onLayoutFinished(info, true)
+    }
+
+    override fun onWrite(
+        pages: Array<out PageRange>?,
+        destination: ParcelFileDescriptor?,
+        cancellationSignal: CancellationSignal?,
+        callback: WriteResultCallback?
+    ) {
+        try {
+            FileInputStream(file).use { input ->
+                FileOutputStream(destination?.fileDescriptor).use { output ->
+                    input.copyTo(output)
+                }
+            }
+            callback?.onWriteFinished(arrayOf(PageRange.ALL_PAGES))
+        } catch (e: Exception) {
+            callback?.onWriteFailed(e.message)
+        }
+    }
+}
+

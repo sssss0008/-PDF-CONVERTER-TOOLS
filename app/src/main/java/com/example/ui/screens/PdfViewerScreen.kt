@@ -24,9 +24,16 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Print
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material3.BottomAppBar
+import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -86,12 +93,24 @@ fun PdfViewerScreen(
         }
     }
 
+    val exportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/pdf")
+    ) { uri: Uri? ->
+        uri?.let { viewModel.exportPdfToUri(context, file, it) }
+    }
+
     Scaffold(
         topBar = {
             PdfTopBar(
                 title = title.ifBlank { file.name },
                 onBack = { viewModel.navigateTo(AppScreen.Home) },
                 actions = {
+                    IconButton(onClick = { viewModel.downloadToDevice(context, file) }) {
+                        Icon(imageVector = Icons.Default.Download, contentDescription = "Save to Downloads")
+                    }
+                    IconButton(onClick = { viewModel.printPdf(context, file) }) {
+                        Icon(imageVector = Icons.Default.Print, contentDescription = "Print PDF")
+                    }
                     IconButton(onClick = { viewModel.sharePdf(context, file) }) {
                         Icon(imageVector = Icons.Default.Share, contentDescription = "Share PDF")
                     }
@@ -100,6 +119,51 @@ fun PdfViewerScreen(
                     }
                 }
             )
+        },
+        bottomBar = {
+            Surface(
+                tonalElevation = 6.dp,
+                shadowElevation = 8.dp,
+                color = MaterialTheme.colorScheme.surface
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Button(
+                        onClick = { viewModel.downloadToDevice(context, file) },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Download", fontWeight = FontWeight.Bold)
+                    }
+
+                    OutlinedButton(
+                        onClick = { viewModel.sharePdf(context, file) },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Share")
+                    }
+
+                    IconButton(
+                        onClick = { viewModel.openWithExternalApp(context, file) },
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                    ) {
+                        Icon(Icons.Default.OpenInNew, contentDescription = "Open in other app", modifier = Modifier.size(20.dp))
+                    }
+                }
+            }
         },
         modifier = modifier
     ) { innerPadding ->

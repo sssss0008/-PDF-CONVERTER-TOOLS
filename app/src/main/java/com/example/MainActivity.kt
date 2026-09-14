@@ -20,15 +20,26 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.ui.AppScreen
 import com.example.ui.PdfViewModel
 import com.example.ui.components.ConversionProgressDialog
+import com.example.ui.screens.CompressPdfScreen
+import com.example.ui.screens.DeletePagesScreen
+import com.example.ui.screens.DocumentScanScreen
+import com.example.ui.screens.ExtractTextScreen
+import com.example.ui.screens.GrayscaleInvertScreen
 import com.example.ui.screens.HistoryScreen
 import com.example.ui.screens.HomeScreen
 import com.example.ui.screens.ImagesToPdfScreen
 import com.example.ui.screens.MergePdfScreen
+import com.example.ui.screens.PageNumbersScreen
 import com.example.ui.screens.PdfToImagesScreen
 import com.example.ui.screens.PdfViewerScreen
+import com.example.ui.screens.ReorderPagesScreen
+import com.example.ui.screens.RotatePdfScreen
+import com.example.ui.screens.SignPdfScreen
 import com.example.ui.screens.SplitPdfScreen
+import com.example.ui.screens.StampPdfScreen
 import com.example.ui.screens.TextToPdfScreen
 import com.example.ui.screens.WatermarkPdfScreen
+import com.example.ui.screens.WebHtmlToPdfScreen
 import com.example.ui.theme.MyApplicationTheme
 import kotlinx.coroutines.flow.collectLatest
 
@@ -106,6 +117,73 @@ fun PdfConverterApp(
             }
             is AppScreen.WatermarkPdf -> {
                 WatermarkPdfScreen(
+                    viewModel = viewModel,
+                    modifier = Modifier.padding(innerPadding)
+                )
+            }
+            is AppScreen.CompressPdf -> {
+                CompressPdfScreen(
+                    viewModel = viewModel,
+                    modifier = Modifier.padding(innerPadding)
+                )
+            }
+            is AppScreen.RotatePdf -> {
+                RotatePdfScreen(
+                    viewModel = viewModel,
+                    modifier = Modifier.padding(innerPadding)
+                )
+            }
+            is AppScreen.GrayscaleInvertPdf -> {
+                GrayscaleInvertScreen(
+                    initialMode = screen.initialMode,
+                    viewModel = viewModel,
+                    modifier = Modifier.padding(innerPadding)
+                )
+            }
+            is AppScreen.PageNumbersPdf -> {
+                PageNumbersScreen(
+                    viewModel = viewModel,
+                    modifier = Modifier.padding(innerPadding)
+                )
+            }
+            is AppScreen.DeletePagesPdf -> {
+                DeletePagesScreen(
+                    viewModel = viewModel,
+                    modifier = Modifier.padding(innerPadding)
+                )
+            }
+            is AppScreen.ReorderPagesPdf -> {
+                ReorderPagesScreen(
+                    viewModel = viewModel,
+                    modifier = Modifier.padding(innerPadding)
+                )
+            }
+            is AppScreen.SignPdf -> {
+                SignPdfScreen(
+                    viewModel = viewModel,
+                    modifier = Modifier.padding(innerPadding)
+                )
+            }
+            is AppScreen.StampPdf -> {
+                StampPdfScreen(
+                    viewModel = viewModel,
+                    modifier = Modifier.padding(innerPadding)
+                )
+            }
+            is AppScreen.DocumentScan -> {
+                DocumentScanScreen(
+                    viewModel = viewModel,
+                    modifier = Modifier.padding(innerPadding)
+                )
+            }
+            is AppScreen.WebHtmlToPdf -> {
+                WebHtmlToPdfScreen(
+                    viewModel = viewModel,
+                    modifier = Modifier.padding(innerPadding)
+                )
+            }
+            is AppScreen.ExtractText -> {
+                ExtractTextScreen(
                     viewModel = viewModel,
                     modifier = Modifier.padding(innerPadding)
                 )

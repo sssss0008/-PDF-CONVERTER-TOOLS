@@ -23,6 +23,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
@@ -197,6 +198,9 @@ fun HistoryScreen(
                         onOpen = {
                             viewModel.navigateTo(AppScreen.Viewer(File(pdf.filePath), pdf.title))
                         },
+                        onDownload = {
+                            viewModel.downloadToDevice(context, File(pdf.filePath))
+                        },
                         onShare = {
                             viewModel.sharePdf(context, File(pdf.filePath))
                         },
@@ -241,6 +245,7 @@ fun HistoryScreen(
 fun HistoryItemCard(
     pdf: PdfItem,
     onOpen: () -> Unit,
+    onDownload: () -> Unit,
     onShare: () -> Unit,
     onToggleFavorite: () -> Unit,
     onDelete: () -> Unit,
@@ -333,6 +338,15 @@ fun HistoryItemCard(
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onDownload, modifier = Modifier.size(34.dp)) {
+                    Icon(
+                        imageVector = Icons.Default.Download,
+                        contentDescription = "Download to Device",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+
                 IconButton(onClick = onToggleFavorite, modifier = Modifier.size(34.dp)) {
                     Icon(
                         imageVector = if (pdf.isFavorite) Icons.Default.Star else Icons.Default.StarOutline,
