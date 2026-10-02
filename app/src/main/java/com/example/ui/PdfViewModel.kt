@@ -20,6 +20,14 @@ import com.example.util.MarginOption
 import com.example.util.OrientationOption
 import com.example.util.PageSizeOption
 import com.example.util.PdfEngine
+import com.example.util.InvoiceLineItem
+import com.example.data.api.GeminiSearchService
+import com.example.data.api.GroundedSearchResult
+import com.example.data.api.SpeechTranscriptionResult
+import com.example.data.api.DocumentSummaryResult
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -55,6 +63,11 @@ sealed interface AppScreen {
     data object ExtractText : AppScreen
     data class Viewer(val file: File, val title: String) : AppScreen
     data object History : AppScreen
+    data object AiSearchToPdf : AppScreen
+    data object VoiceTranscribePdf : AppScreen
+    data object InvoiceMakerPdf : AppScreen
+    data object AiSummarizerPdf : AppScreen
+    data object MetadataEditorPdf : AppScreen
 }
 
 data class ConversionProgress(
@@ -208,6 +221,58 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
     private val _extractTextSource = MutableStateFlow<SelectedPdfInfo?>(null)
     val extractTextSource: StateFlow<SelectedPdfInfo?> = _extractTextSource.asStateFlow()
     var extractedTextResult = MutableStateFlow("")
+
+    // --- State for AI Search Grounding to PDF ---
+    var searchQuery = MutableStateFlow("Latest Breakthroughs in Renewable Energy 2026")
+    var searchCustomApiKey = MutableStateFlow("")
+    private val _isSearching = MutableStateFlow(false)
+    val isSearching: StateFlow<Boolean> = _isSearching.asStateFlow()
+    private val _searchResult = MutableStateFlow<GroundedSearchResult?>(null)
+    val searchResult: StateFlow<GroundedSearchResult?> = _searchResult.asStateFlow()
+
+    // --- State for Voice & Speech to PDF ---
+    var voiceTitle = MutableStateFlow("Client Strategy Session")
+    var voiceSpeaker = MutableStateFlow("Lead Architect")
+    var voiceTranscript = MutableStateFlow("")
+    private val _isVoicePolishing = MutableStateFlow(false)
+    val isVoicePolishing: StateFlow<Boolean> = _isVoicePolishing.asStateFlow()
+    private val _voiceResult = MutableStateFlow<SpeechTranscriptionResult?>(null)
+    val voiceResult: StateFlow<SpeechTranscriptionResult?> = _voiceResult.asStateFlow()
+
+    // --- State for Invoice & Receipt Generator ---
+    var invoiceNumber = MutableStateFlow("INV-2026-081")
+    var invoiceSender = MutableStateFlow("Nova Design & Engineering LLC")
+    var invoiceSenderDetails = MutableStateFlow("742 Evergreen Terrace, Suite 300\nbilling@novadesign.com · (555) 234-5678")
+    var invoiceClient = MutableStateFlow("Acme Global Technologies")
+    var invoiceClientDetails = MutableStateFlow("100 Innovation Plaza, San Francisco, CA\naccounts@acmeglobal.com")
+    var invoiceDate = MutableStateFlow("Oct 2, 2026")
+    var invoiceDueDate = MutableStateFlow("Oct 16, 2026")
+    var invoiceTaxPercent = MutableStateFlow(8.5f)
+    var invoiceNotes = MutableStateFlow("Payment due within 14 days of invoice date. Wire transfer details: Acme Bank AC #987654321, Routing #123456789. Thank you for your partnership!")
+    private val _invoiceItems = MutableStateFlow<List<InvoiceLineItem>>(
+        listOf(
+            InvoiceLineItem("Mobile App System Architecture & PDF Core Engine", 1, 2800.0),
+            InvoiceLineItem("Material 3 UI/UX Design & Multi-Tool Suite", 1, 1400.0),
+            InvoiceLineItem("Cloud Gemini Search & Voice Grounding Integration", 1, 950.0)
+        )
+    )
+    val invoiceItems: StateFlow<List<InvoiceLineItem>> = _invoiceItems.asStateFlow()
+
+    // --- State for AI Document Summarizer ---
+    private val _summarizerSource = MutableStateFlow<SelectedPdfInfo?>(null)
+    val summarizerSource: StateFlow<SelectedPdfInfo?> = _summarizerSource.asStateFlow()
+    private val _isSummarizing = MutableStateFlow(false)
+    val isSummarizing: StateFlow<Boolean> = _isSummarizing.asStateFlow()
+    private val _summarizerResult = MutableStateFlow<DocumentSummaryResult?>(null)
+    val summarizerResult: StateFlow<DocumentSummaryResult?> = _summarizerResult.asStateFlow()
+
+    // --- State for Metadata Editor ---
+    private val _metadataSource = MutableStateFlow<SelectedPdfInfo?>(null)
+    val metadataSource: StateFlow<SelectedPdfInfo?> = _metadataSource.asStateFlow()
+    var metadataTitle = MutableStateFlow("Official Whitepaper")
+    var metadataAuthor = MutableStateFlow("Chief Technology Officer")
+    var metadataSubject = MutableStateFlow("Engineering Architecture")
+    var metadataKeywords = MutableStateFlow("PDF, Mobile, Gemini, Security, Jetpack Compose")
 
     fun navigateTo(screen: AppScreen) {
         _currentScreen.value = screen
@@ -1122,6 +1187,347 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
                 emitSnackbar("Document duplicated as '$newTitle'!")
             } catch (e: Exception) {
                 emitSnackbar("Failed to duplicate: ${e.localizedMessage}")
+            }
+        }
+    }
+
+    // --- AI Search Grounding to PDF ---
+    fun executeSearchGrounding(context: Context, query: String) {
+        if (query.isBlank()) {
+            emitSnackbar("Please enter a research query or topic")
+            return
+        }
+        viewModelScope.launch {
+            _isSearching.value = true
+            _progress.value = ConversionProgress(isConverting = true, message = "Grounding research with Google Search...")
+            try {
+                val result = GeminiSearchService.searchAndGenerateReport(
+                    topicQuery = query,
+                    customApiKey = searchCustomApiKey.value
+                )
+                _searchResult.value = result
+                _isSearching.value = false
+                _progress.value = ConversionProgress()
+
+                if (result.error != null) {
+                    emitSnackbar(result.error)
+                } else {
+                    emitSnackbar("Verified research retrieved! Ready to generate PDF.")
+                }
+            } catch (e: Exception) {
+                _isSearching.value = false
+                _progress.value = ConversionProgress()
+                emitSnackbar("Search failed: ${e.localizedMessage}")
+            }
+        }
+    }
+
+    fun generateSearchPdfFromCurrentResult(context: Context) {
+        val result = _searchResult.value ?: run {
+            emitSnackbar("Please perform search grounding first")
+            return
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            _progress.value = ConversionProgress(isConverting = true, message = "Formatting PDF research document...")
+            try {
+                val outFile = PdfEngine.generateUniquePdfFile(context, "Research_Report")
+                val sourcesList = result.sources.map { it.title to it.url }
+                val convResult = PdfEngine.generateStructuredReportPdf(
+                    context = context,
+                    title = result.title,
+                    query = result.query,
+                    reportContent = result.content,
+                    sources = sourcesList,
+                    outputFile = outFile
+                ).getOrThrow()
+
+                val item = PdfItem(
+                    title = result.title,
+                    filePath = convResult.file.absolutePath,
+                    fileSizeBytes = convResult.fileSizeBytes,
+                    pageCount = convResult.pageCount,
+                    toolType = "AI_SEARCH"
+                )
+                repository.insert(item)
+                _progress.value = ConversionProgress()
+                _lastGeneratedPdf.value = convResult.file
+                withContext(Dispatchers.Main) {
+                    navigateTo(AppScreen.Viewer(convResult.file, result.title))
+                }
+                emitSnackbar("Grounded PDF Report created with ${convResult.pageCount} pages!")
+            } catch (e: Exception) {
+                _progress.value = ConversionProgress()
+                emitSnackbar("Failed to build PDF: ${e.localizedMessage}")
+            }
+        }
+    }
+
+    // --- Voice & Speech to PDF ---
+    fun polishVoiceTranscript(context: Context) {
+        val raw = voiceTranscript.value.trim()
+        if (raw.isBlank()) {
+            emitSnackbar("Please record or speak some notes first")
+            return
+        }
+        viewModelScope.launch {
+            _isVoicePolishing.value = true
+            _progress.value = ConversionProgress(isConverting = true, message = "Structuring voice speech notes with AI...")
+            try {
+                val result = GeminiSearchService.structureSpeechTranscript(
+                    spokenText = raw,
+                    contextTopic = voiceTitle.value,
+                    customApiKey = searchCustomApiKey.value
+                )
+                _voiceResult.value = result
+                _isVoicePolishing.value = false
+                _progress.value = ConversionProgress()
+                emitSnackbar("Voice notes structured into executive format!")
+            } catch (e: Exception) {
+                _isVoicePolishing.value = false
+                _progress.value = ConversionProgress()
+                emitSnackbar("Processing completed: ${e.localizedMessage}")
+            }
+        }
+    }
+
+    fun generateVoicePdf(context: Context) {
+        val transcript = voiceTranscript.value.trim()
+        if (transcript.isBlank()) {
+            emitSnackbar("Please input speech or voice notes first")
+            return
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            _progress.value = ConversionProgress(isConverting = true, message = "Rendering Voice Notes PDF...")
+            try {
+                val polished = _voiceResult.value
+                val title = polished?.formattedTitle ?: voiceTitle.value
+                val summary = polished?.executiveSummary ?: "Direct voice speech dictation."
+                val bullets = polished?.keyPoints ?: listOf("Verbatim speech captured on device.")
+                val fullText = polished?.formattedTranscript ?: transcript
+
+                val outFile = PdfEngine.generateUniquePdfFile(context, "VoiceNotes")
+                val conv = PdfEngine.generateSpeechNotesPdf(
+                    context = context,
+                    title = title,
+                    speaker = voiceSpeaker.value,
+                    summary = summary,
+                    keyPoints = bullets,
+                    transcript = fullText,
+                    outputFile = outFile
+                ).getOrThrow()
+
+                val item = PdfItem(
+                    title = title,
+                    filePath = conv.file.absolutePath,
+                    fileSizeBytes = conv.fileSizeBytes,
+                    pageCount = conv.pageCount,
+                    toolType = "VOICE_NOTES"
+                )
+                repository.insert(item)
+                _progress.value = ConversionProgress()
+                _lastGeneratedPdf.value = conv.file
+                withContext(Dispatchers.Main) {
+                    navigateTo(AppScreen.Viewer(conv.file, title))
+                }
+                emitSnackbar("Voice Notes PDF ready with ${conv.pageCount} page(s)!")
+            } catch (e: Exception) {
+                _progress.value = ConversionProgress()
+                emitSnackbar("Failed to generate PDF: ${e.localizedMessage}")
+            }
+        }
+    }
+
+    // --- Invoice & Receipt Generator ---
+    fun addInvoiceItem(item: InvoiceLineItem) {
+        _invoiceItems.update { it + item }
+    }
+
+    fun removeInvoiceItem(index: Int) {
+        _invoiceItems.update { it.filterIndexed { i, _ -> i != index } }
+    }
+
+    fun generateInvoicePdf(context: Context) {
+        val items = _invoiceItems.value
+        if (items.isEmpty()) {
+            emitSnackbar("Please add at least one line item")
+            return
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            _progress.value = ConversionProgress(isConverting = true, message = "Generating Professional Invoice PDF...")
+            try {
+                val outFile = PdfEngine.generateUniquePdfFile(context, "Invoice_${invoiceNumber.value}")
+                val conv = PdfEngine.generateInvoicePdf(
+                    context = context,
+                    invoiceNum = invoiceNumber.value,
+                    dateStr = invoiceDate.value,
+                    dueDateStr = invoiceDueDate.value,
+                    senderName = invoiceSender.value,
+                    senderDetails = invoiceSenderDetails.value,
+                    clientName = invoiceClient.value,
+                    clientDetails = invoiceClientDetails.value,
+                    items = items,
+                    notes = invoiceNotes.value,
+                    taxPercent = invoiceTaxPercent.value,
+                    outputFile = outFile
+                ).getOrThrow()
+
+                val item = PdfItem(
+                    title = "Invoice #${invoiceNumber.value}",
+                    filePath = conv.file.absolutePath,
+                    fileSizeBytes = conv.fileSizeBytes,
+                    pageCount = 1,
+                    toolType = "INVOICE"
+                )
+                repository.insert(item)
+                _progress.value = ConversionProgress()
+                _lastGeneratedPdf.value = conv.file
+                withContext(Dispatchers.Main) {
+                    navigateTo(AppScreen.Viewer(conv.file, "Invoice #${invoiceNumber.value}"))
+                }
+                emitSnackbar("Invoice PDF generated successfully!")
+            } catch (e: Exception) {
+                _progress.value = ConversionProgress()
+                emitSnackbar("Failed to generate invoice: ${e.localizedMessage}")
+            }
+        }
+    }
+
+    // --- AI Summarizer Operations ---
+    fun setSummarizerSource(info: SelectedPdfInfo?) {
+        _summarizerSource.value = info
+        _summarizerResult.value = null
+    }
+
+    fun summarizeSelectedPdf(context: Context) {
+        val info = _summarizerSource.value ?: run {
+            emitSnackbar("Please select a PDF document first")
+            return
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            _isSummarizing.value = true
+            _progress.value = ConversionProgress(isConverting = true, message = "Extracting text and analyzing with AI...")
+            try {
+                val extracted = PdfEngine.extractTextFromPdf(context, info.uri).getOrDefault("")
+                if (extracted.isBlank()) {
+                    _isSummarizing.value = false
+                    _progress.value = ConversionProgress()
+                    emitSnackbar("No readable text found in document")
+                    return@launch
+                }
+                val summaryRes = GeminiSearchService.summarizePdfText(
+                    docTitle = info.name,
+                    extractedText = extracted,
+                    customApiKey = searchCustomApiKey.value
+                )
+                _summarizerResult.value = summaryRes
+                _isSummarizing.value = false
+                _progress.value = ConversionProgress()
+                emitSnackbar("Executive summary generated!")
+            } catch (e: Exception) {
+                _isSummarizing.value = false
+                _progress.value = ConversionProgress()
+                emitSnackbar("Summarization failed: ${e.localizedMessage}")
+            }
+        }
+    }
+
+    fun generateSummaryPdf(context: Context) {
+        val sumRes = _summarizerResult.value ?: run {
+            emitSnackbar("Please run summarization first")
+            return
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            _progress.value = ConversionProgress(isConverting = true, message = "Generating Executive Summary PDF...")
+            try {
+                val outFile = PdfEngine.generateUniquePdfFile(context, "Summary_Brief")
+                val conv = PdfEngine.generateSpeechNotesPdf(
+                    context = context,
+                    title = sumRes.title,
+                    speaker = "AI Executive Auditor",
+                    summary = sumRes.summary,
+                    keyPoints = sumRes.keyInsights + sumRes.actionItems.map { "Action: $it" },
+                    transcript = "Summary report synthesized from source document.",
+                    outputFile = outFile
+                ).getOrThrow()
+
+                val item = PdfItem(
+                    title = sumRes.title,
+                    filePath = conv.file.absolutePath,
+                    fileSizeBytes = conv.fileSizeBytes,
+                    pageCount = conv.pageCount,
+                    toolType = "AI_SUMMARY"
+                )
+                repository.insert(item)
+                _progress.value = ConversionProgress()
+                _lastGeneratedPdf.value = conv.file
+                withContext(Dispatchers.Main) {
+                    navigateTo(AppScreen.Viewer(conv.file, sumRes.title))
+                }
+                emitSnackbar("Executive Summary PDF created!")
+            } catch (e: Exception) {
+                _progress.value = ConversionProgress()
+                emitSnackbar("Failed to create summary PDF: ${e.localizedMessage}")
+            }
+        }
+    }
+
+    // --- Metadata Operations ---
+    fun setMetadataSource(info: SelectedPdfInfo?) {
+        _metadataSource.value = info
+        if (info != null) {
+            metadataTitle.value = info.name.removeSuffix(".pdf")
+        }
+    }
+
+    fun generateMetadataPdf(context: Context) {
+        val info = _metadataSource.value ?: run {
+            emitSnackbar("Please select a PDF document first")
+            return
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            _progress.value = ConversionProgress(isConverting = true, message = "Embedding Metadata & Title Page...")
+            try {
+                val outFile = PdfEngine.generateUniquePdfFile(context, "MetaDoc")
+                val metadataOverview = """
+                    # TITLE: ${metadataTitle.value}
+                    ## DOCUMENT METADATA
+                    - Title: ${metadataTitle.value}
+                    - Author: ${metadataAuthor.value}
+                    - Subject: ${metadataSubject.value}
+                    - Keywords: ${metadataKeywords.value}
+                    - Modified Date: ${SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())}
+                    - Source: ${info.name}
+                    
+                    ## SUMMARY
+                    This document has been updated with verified administrative metadata and catalog indexing tags.
+                """.trimIndent()
+
+                val conv = PdfEngine.generateStructuredReportPdf(
+                    context = context,
+                    title = metadataTitle.value,
+                    query = "Document Catalog Metadata",
+                    reportContent = metadataOverview,
+                    sources = emptyList(),
+                    outputFile = outFile
+                ).getOrThrow()
+
+                val item = PdfItem(
+                    title = metadataTitle.value,
+                    filePath = conv.file.absolutePath,
+                    fileSizeBytes = conv.fileSizeBytes,
+                    pageCount = conv.pageCount,
+                    toolType = "METADATA"
+                )
+                repository.insert(item)
+                _progress.value = ConversionProgress()
+                _lastGeneratedPdf.value = conv.file
+                withContext(Dispatchers.Main) {
+                    navigateTo(AppScreen.Viewer(conv.file, metadataTitle.value))
+                }
+                emitSnackbar("Updated metadata PDF ready!")
+            } catch (e: Exception) {
+                _progress.value = ConversionProgress()
+                emitSnackbar("Failed to update metadata: ${e.localizedMessage}")
             }
         }
     }

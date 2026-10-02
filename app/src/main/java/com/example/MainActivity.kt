@@ -40,6 +40,11 @@ import com.example.ui.screens.StampPdfScreen
 import com.example.ui.screens.TextToPdfScreen
 import com.example.ui.screens.WatermarkPdfScreen
 import com.example.ui.screens.WebHtmlToPdfScreen
+import com.example.ui.screens.AiSearchToPdfScreen
+import com.example.ui.screens.VoiceTranscribeScreen
+import com.example.ui.screens.InvoiceMakerScreen
+import com.example.ui.screens.AiSummarizerScreen
+import com.example.ui.screens.MetadataEditorScreen
 import com.example.ui.theme.MyApplicationTheme
 import kotlinx.coroutines.flow.collectLatest
 
@@ -198,6 +203,36 @@ fun PdfConverterApp(
             }
             is AppScreen.History -> {
                 HistoryScreen(
+                    viewModel = viewModel,
+                    modifier = Modifier.padding(innerPadding)
+                )
+            }
+            is AppScreen.AiSearchToPdf -> {
+                AiSearchToPdfScreen(
+                    viewModel = viewModel,
+                    modifier = Modifier.padding(innerPadding)
+                )
+            }
+            is AppScreen.VoiceTranscribePdf -> {
+                VoiceTranscribeScreen(
+                    viewModel = viewModel,
+                    modifier = Modifier.padding(innerPadding)
+                )
+            }
+            is AppScreen.InvoiceMakerPdf -> {
+                InvoiceMakerScreen(
+                    viewModel = viewModel,
+                    modifier = Modifier.padding(innerPadding)
+                )
+            }
+            is AppScreen.AiSummarizerPdf -> {
+                AiSummarizerScreen(
+                    viewModel = viewModel,
+                    modifier = Modifier.padding(innerPadding)
+                )
+            }
+            is AppScreen.MetadataEditorPdf -> {
+                MetadataEditorScreen(
                     viewModel = viewModel,
                     modifier = Modifier.padding(innerPadding)
                 )

@@ -1,6 +1,6 @@
 {
   "name": "PDF Converter",
-  "description": "Complete PDF converter and utility suite with 20+ tools: Images to PDF, Document Scanner, Text to PDF, Web to PDF, Merge, Split, Compress, Rotate, B&W Ink-Saver, Dark Mode, Page Numbers, Delete & Reorder Pages, Digital Signature, Official Stamps, Extract Text, Direct Downloads, Print, and Sharing.",
+  "description": "Complete PDF converter and utility suite with 25+ tools: Google Search Grounding to PDF, Voice & Speech to PDF, Invoice Maker, AI Summarizer, Images to PDF, Document Scanner, Text to PDF, Web to PDF, Merge, Split, Compress, Rotate, B&W Ink-Saver, Dark Mode, Page Numbers, Delete & Reorder Pages, Digital Signature, Official Stamps, Extract Text & Images, Direct Downloads, Print, and Sharing.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

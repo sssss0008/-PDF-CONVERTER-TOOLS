@@ -23,6 +23,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.CallSplit
 import androidx.compose.material.icons.filled.Clear
@@ -33,14 +34,17 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Draw
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FormatColorReset
 import androidx.compose.material.icons.filled.FormatListNumbered
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Merge
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Print
+import androidx.compose.material.icons.filled.Receipt
 import androidx.compose.material.icons.filled.RotateRight
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
@@ -48,6 +52,7 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarOutline
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.TextFields
+import androidx.compose.material.icons.filled.TravelExplore
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.Card
@@ -321,6 +326,55 @@ fun HomeScreen(
                 onClick = { _, pick -> pick() }
             ),
             ToolDefinition(
+                id = "ai_search_to_pdf",
+                title = "AI Search to PDF",
+                subtitle = "Google Search grounding report",
+                icon = Icons.Default.TravelExplore,
+                iconBgColor = Color(0xFF0D47A1),
+                category = "AI",
+                badge = "Search Grounding",
+                onClick = { vm, _ -> vm.navigateTo(AppScreen.AiSearchToPdf) }
+            ),
+            ToolDefinition(
+                id = "ai_summarizer",
+                title = "AI PDF Summarizer",
+                subtitle = "Executive brief & key takeaways",
+                icon = Icons.Default.AutoAwesome,
+                iconBgColor = Color(0xFF6A1B9A),
+                category = "AI",
+                badge = "Gemini AI",
+                onClick = { vm, _ -> vm.navigateTo(AppScreen.AiSummarizerPdf) }
+            ),
+            ToolDefinition(
+                id = "voice_transcribe",
+                title = "Voice Speech to PDF",
+                subtitle = "Transcribe microphone dictation",
+                icon = Icons.Default.Mic,
+                iconBgColor = Color(0xFF1A237E),
+                category = "Convert",
+                badge = "Live Mic",
+                onClick = { vm, _ -> vm.navigateTo(AppScreen.VoiceTranscribePdf) }
+            ),
+            ToolDefinition(
+                id = "invoice_maker",
+                title = "Invoice & Receipt Maker",
+                subtitle = "Professional billing & totals",
+                icon = Icons.Default.Receipt,
+                iconBgColor = Color(0xFF37474F),
+                category = "Security",
+                badge = "Business",
+                onClick = { vm, _ -> vm.navigateTo(AppScreen.InvoiceMakerPdf) }
+            ),
+            ToolDefinition(
+                id = "metadata_editor",
+                title = "PDF Metadata Editor",
+                subtitle = "Title, author, tags & catalog",
+                icon = Icons.Default.Edit,
+                iconBgColor = Color(0xFF00695C),
+                category = "Optimize",
+                onClick = { vm, _ -> vm.navigateTo(AppScreen.MetadataEditorPdf) }
+            ),
+            ToolDefinition(
                 id = "my_library",
                 title = "My Library",
                 subtitle = "${allPdfs.size} saved documents",
@@ -345,10 +399,11 @@ fun HomeScreen(
 
     val categories = listOf(
         Pair("All", "All (${allTools.size})"),
+        Pair("AI", "AI & Google Search"),
         Pair("Convert", "Convert & Scan"),
         Pair("Organize", "Organize Pages"),
         Pair("Optimize", "Optimize & Style"),
-        Pair("Security", "Sign & Badges")
+        Pair("Security", "Sign & Business")
     )
 
     LazyColumn(
